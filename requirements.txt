@@ -1,1 +1,2 @@
 opendartreader
+python-dotenv

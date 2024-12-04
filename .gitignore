@@ -285,5 +285,8 @@ exp/*
 data/
 data/*
 
+# env
+.env
+
 
 # End of https://www.toptal.com/developers/gitignore/api/python,visualstudiocode,jupyternotebooks,linux,windows,macos
