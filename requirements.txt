@@ -1,2 +1,2 @@
-opendartreader
 python-dotenv
+fake-useragent
