@@ -6,13 +6,14 @@ import requests
 import time
 
 import dill
-import OpenDartReader
 import pandas as pd
 
 from datetime import datetime, timedelta
-from fake_useragent import UserAgent
 from bs4 import BeautifulSoup
 from tqdm.auto import tqdm
+
+from src.OpenDartReader import OpenDartReader
+from src.utils import ProxyUserAgentManager
 
 from dotenv import load_dotenv
 
@@ -24,7 +25,7 @@ ssl._create_default_https_context = ssl._create_unverified_context
 class DartCrawler:
     def __init__(self):
         self.dart = OpenDartReader(os.getenv("DART_API_KEY"))
-        self.user_agent = UserAgent()
+        self.proxy_user_agent_manager = ProxyUserAgentManager()
 
     def get_list(self, start_date: str, end_date: str, kind: str = "") -> pd.DataFrame:
         self.start_date, self.end_date = start_date, end_date
@@ -57,26 +58,31 @@ class DartCrawler:
             rcept_no, report_nm = row["rcept_no"], row["report_nm"]
 
             doc_df = self.dart.sub_docs(rcept_no)
-            document = {}
+            docs = []
             for idx, row in doc_df.iterrows():
                 url = row["url"]
                 title = row["title"]
-                headers = {"User-Agent": self.user_agent.random}
+                user_agent = self.proxy_user_agent_manager.get_next_proxy_user_agent()["user_agent"]
+                headers = {"User-Agent": user_agent}
                 response = requests.get(url, headers=headers)
                 soup = BeautifulSoup(response.text, "html.parser")
                 text = soup.get_text(strip=False)
                 text = re.sub(r"\n+", "\n", text)
                 text = re.sub(r" {2,}", " ", text)
 
-                document["title"] = title
-                document["text"] = text
+                docs.append({
+                    "title": title,
+                    "text": text,
+                })
+
+                time.sleep(random.uniform(0.3, 0.7))
 
             self.data.append(
                 {
                     "corp_code": corp_code,
                     "corp_name": corp_name,
                     "report_nm": report_nm,
-                    "document": document,
+                    "document": docs,
                 }
             )
             time.sleep(random.uniform(0.3, 0.9))

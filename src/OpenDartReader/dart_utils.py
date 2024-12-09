@@ -13,9 +13,12 @@ import pandas as pd
 import json
 import difflib
 
-from fake_useragent import UserAgent
+import sys
 
-USER_AGENT = UserAgent()
+sys.path.append("..")
+from src.utils import ProxyUserAgentManager
+
+PROXI_MANAGER = ProxyUserAgentManager()
 
 
 def _validate_dates(start, end):
@@ -60,7 +63,10 @@ def list_date_ex(date=None, cache=True):
     for page in range(1, 100):
         time.sleep(0.1)
         url = f'http://dart.fss.or.kr/dsac001/search.ax?selectDate={date_str}&pageGrouping=A&currentPage={page}'
-        headers = {'User-Agent': USER_AGENT.random}
+        config = PROXI_MANAGER.get_next_proxy_user_agent()
+        headers = {
+            "User-Agent": config["user_agent"],
+        }
         xhtml_text = _requests_get_cache(url, headers=headers) if cache else requests.get(url, headers).text
 
         if '검색된 자료가 없습니다' in xhtml_text:
@@ -98,10 +104,14 @@ def sub_docs(rcp_no, match=None):
     * rcp_no: 접수번호를 지정합니다. rcp_no 대신 첨부문서의 URL(http로 시작)을 사용할 수 도 있습니다.
     * match: 매칭할 문자열 (문자열을 지정하면 문서 제목과 가장 유사한 순서로 소트 합니다)
     '''
+    config = PROXI_MANAGER.get_next_proxy_user_agent()
+    headers = {
+        "User-Agent": config["user_agent"],
+    }
     if rcp_no.isdecimal():
-        r = requests.get(f'http://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcp_no}', headers={'User-Agent': USER_AGENT.random})
+        r = requests.get(f'http://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcp_no}', headers=headers)
     elif rcp_no.startswith('http'):
-        r = requests.get(rcp_no, headers={'User-Agent': USER_AGENT.random})
+        r = requests.get(rcp_no, headers=headers)
     else:
         raise ValueError('invalid `rcp_no`(or url)')
         
@@ -141,7 +151,7 @@ def sub_docs(rcp_no, match=None):
             doc_url = f'http://dart.fss.or.kr/report/viewer.do?{params}'
             return pd.DataFrame([[doc_title, doc_url]], columns=['title', 'url'])
         else:
-            raise Exception(f'{url} 하위 페이지를 포함하고 있지 않습니다')
+            raise Exception(f'하위 페이지를 포함하고 있지 않습니다')
         
     return pd.DataFrame(None, columns=['title', 'url'])
        
@@ -152,7 +162,11 @@ def attach_docs(rcp_no, match=None):
     * rcp_no: 접수번호
     * match: 문서 제목과 가장 유사한 순서로 소트
     '''
-    r = requests.get(f'http://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcp_no}', headers={'User-Agent': USER_AGENT.random})
+    config = PROXI_MANAGER.get_next_proxy_user_agent()
+    headers = {
+        "User-Agent": config["user_agent"],
+    }
+    r = requests.get(f'http://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcp_no}', headers=headers)
     soup = BeautifulSoup(r.text, features="lxml")
 
     row_list = []
@@ -179,8 +193,12 @@ def attach_files(arg): # rcp_no or URL
     접수번호(rcp_no)에 속한 첨부파일 목록정보를 dict 형식으로 반환합니다.
     * rcp_no: 접수번호를 지정합니다. rcp_no 대신 첨부문서의 URL(http로 시작)을 사용할 수 도 있습니다.
     '''
+    config = PROXI_MANAGER.get_next_proxy_user_agent()
+    headers = {
+        "User-Agent": config["user_agent"],
+    }
     url= arg if arg.startswith('http') else f"http://dart.fss.or.kr/dsaf001/main.do?rcpNo={arg}"
-    r = requests.get(url, headers={'User-Agent': USER_AGENT.random})
+    r = requests.get(url, headers=headers)
 
     rcp_no = dcm_no = None
     matches = re.findall(
@@ -194,7 +212,7 @@ def attach_files(arg): # rcp_no or URL
         print(f'{url} does not have download page. 다운로드 페이지를 포함하고 있지 않습니다.')
 
     download_url = f'http://dart.fss.or.kr/pdf/download/main.do?rcp_no={rcp_no}&dcm_no={dcm_no}'
-    r = requests.get(download_url, headers={'User-Agent': USER_AGENT.random})
+    r = requests.get(download_url, headers=headers)
     soup = BeautifulSoup(r.text, features="lxml")
     table = soup.find('table')
     if not table:
@@ -211,7 +229,11 @@ def attach_files(arg): # rcp_no or URL
 
 def download(url, fn=None):
     fn = fn if fn else url.split('/')[-1]
-    r = requests.get(url, stream=True, headers={'User-Agent': USER_AGENT.random})
+    config = PROXI_MANAGER.get_next_proxy_user_agent()
+    headers = {
+        "User-Agent": config["user_agent"],
+    }
+    r = requests.get(url, stream=True, headers=headers)
     if r.status_code != 200:
         print(r.status_code)
         return None
