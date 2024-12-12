@@ -48,10 +48,12 @@ class DartCrawler:
             start = next_month
 
         self.list_df = pd.concat(dfs, ignore_index=True)
+        self.list_df = self.list_df.sort_values(by="rcept_dt")
         self.list_df = self.list_df.reset_index(drop=True)
         return self.list_df
 
     def get_document(self, list_df: pd.DataFrame, save_dir: str = "data") -> list[dict]:
+        from_date, to_date = list_df.iloc[0]["rcept_dt"], list_df.iloc[-1]["rcept_dt"]
         self.data = []
         for idx, row in tqdm(list_df.iterrows(), total=len(list_df)):
             corp_code, corp_name = row["corp_code"], row["corp_name"]
@@ -88,16 +90,16 @@ class DartCrawler:
             time.sleep(random.uniform(0.3, 0.9))
 
         if save_dir:
-            self._save_data(self.data, save_dir)
+            self._save_data(self.data, from_date, to_date, save_dir)
 
         return self.data
 
-    def _save_data(self, data: list[dict], save_dir: str = "data") -> None:
+    def _save_data(self, data: list[dict], from_date: str, to_date:str, save_dir: str = "data") -> None:
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
         save_path = os.path.join(
-            save_dir, f"dart_report_{self.start_date}_{self.end_date}.pkl"
+            save_dir, f"dart_report_{from_date}_{to_date}.pkl"
         )
         with open(save_path, "wb") as f:
             dill.dump(data, f)
