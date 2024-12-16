@@ -52,54 +52,117 @@ class DartCrawler:
         self.list_df = self.list_df.reset_index(drop=True)
         return self.list_df
 
-    def get_document(self, list_df: pd.DataFrame, save_dir: str = "data") -> list[dict]:
-        from_date, to_date = list_df.iloc[0]["rcept_dt"], list_df.iloc[-1]["rcept_dt"]
+    def get_document(
+        self, list_df: pd.DataFrame, save_dir: str = "data", batch_size: int = 10
+    ) -> list[dict]:
         self.data = []
-        for idx, row in tqdm(list_df.iterrows(), total=len(list_df)):
-            corp_code, corp_name = row["corp_code"], row["corp_name"]
-            rcept_no, report_nm = row["rcept_no"], row["report_nm"]
+        current_batch = []
 
-            doc_df = self.dart.sub_docs(rcept_no)
-            docs = []
-            for idx, row in doc_df.iterrows():
-                url = row["url"]
-                title = row["title"]
-                user_agent = self.proxy_user_agent_manager.get_next_proxy_user_agent()["user_agent"]
-                headers = {"User-Agent": user_agent}
-                response = requests.get(url, headers=headers)
-                soup = BeautifulSoup(response.text, "html.parser")
-                text = soup.get_text(strip=False)
-                text = re.sub(r"\n+", "\n", text)
-                text = re.sub(r" {2,}", " ", text)
+        try:
+            for idx, row in tqdm(list_df.iterrows(), total=len(list_df)):
+                try:
+                    corp_code, corp_name = row["corp_code"], row["corp_name"]
+                    rcept_no, report_nm = row["rcept_no"], row["report_nm"]
 
-                docs.append({
-                    "title": title,
-                    "text": text,
-                })
+                    # 배치의 첫 번째 항목이면 from_date 저장
+                    if len(current_batch) == 0:
+                        batch_from_date = row["rcept_dt"]
 
-                time.sleep(random.uniform(0.3, 0.7))
+                    doc_df = self.dart.sub_docs(rcept_no)
+                    docs = []
 
-            self.data.append(
-                {
-                    "corp_code": corp_code,
-                    "corp_name": corp_name,
-                    "report_nm": report_nm,
-                    "document": docs,
-                }
-            )
-            time.sleep(random.uniform(0.3, 0.9))
+                    for _, doc_row in doc_df.iterrows():
+                        try:
+                            url = doc_row["url"]
+                            title = doc_row["title"]
+                            user_agent = self.proxy_user_agent_manager.get_next_proxy_user_agent()[
+                                "user_agent"
+                            ]
+                            headers = {"User-Agent": user_agent}
+                            response = requests.get(url, headers=headers)
+                            soup = BeautifulSoup(response.text, "html.parser")
+                            text = soup.get_text(strip=False)
+                            text = re.sub(r"\n+", "\n", text)
+                            text = re.sub(r" {2,}", " ", text)
 
-        if save_dir:
-            self._save_data(self.data, from_date, to_date, save_dir)
+                            docs.append(
+                                {
+                                    "title": title,
+                                    "text": text,
+                                }
+                            )
+
+                            time.sleep(random.uniform(0.3, 0.7))
+                        except Exception as e:
+                            print(f"문서 크롤링 중 오류 발생: {e} - URL: {url}")
+                            continue
+
+                    current_doc = {
+                        "corp_code": corp_code,
+                        "corp_name": corp_name,
+                        "report_nm": report_nm,
+                        "document": docs,
+                    }
+
+                    current_batch.append(current_doc)
+                    self.data.append(current_doc)
+                    batch_to_date = row[
+                        "rcept_dt"
+                    ]  # 현재 처리 중인 날짜를 to_date로 저장
+
+                    # batch_size 단위로 저장
+                    if len(current_batch) >= batch_size:
+                        if save_dir:
+                            self._save_batch(
+                                current_batch, save_dir, batch_from_date, batch_to_date
+                            )
+                        current_batch = []
+
+                    time.sleep(random.uniform(0.3, 0.9))
+
+                except Exception as e:
+                    print(f"데이터 처리 중 오류 발생: {e} - 기업명: {corp_name}")
+                    if current_batch:  # 에러 발생 시 현재 배치 저장
+                        self._save_batch(
+                            current_batch, save_dir, batch_from_date, batch_to_date
+                        )
+                    current_batch = []
+                    continue
+
+        except Exception as e:
+            print(f"전체 처리 중 오류 발생: {e}")
+            if current_batch:  # 에러 발생 시 현재 배치 저장
+                self._save_batch(
+                    current_batch, save_dir, batch_from_date, batch_to_date
+                )
+        finally:
+            # 마지막 배치 저장
+            if current_batch and save_dir:
+                self._save_batch(
+                    current_batch, save_dir, batch_from_date, batch_to_date
+                )
 
         return self.data
 
-    def _save_data(self, data: list[dict], from_date: str, to_date:str, save_dir: str = "data") -> None:
+    def _save_batch(
+        self, batch: list[dict], save_dir: str, from_date: str, to_date: str
+    ) -> None:
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
-        save_path = os.path.join(
-            save_dir, f"dart_report_{from_date}_{to_date}.pkl"
-        )
-        with open(save_path, "wb") as f:
-            dill.dump(data, f)
+        base_filename = f"dart_report_{from_date}_{to_date}.pkl"
+        save_path = os.path.join(save_dir, base_filename)
+
+        # 파일이 이미 존재하는 경우 버전 넘버 추가
+        version = 0
+        while os.path.exists(save_path):
+            version += 1
+            filename = f"dart_report_{from_date}_{to_date}_v{version}.pkl"
+            save_path = os.path.join(save_dir, filename)
+
+        try:
+            with open(save_path, "wb") as f:
+                dill.dump(batch, f)
+            print(f"배치 저장 완료: {save_path} (기간: {from_date} ~ {to_date})")
+        except Exception as e:
+            print(f"배치 저장 중 오류 발생: {e}")
